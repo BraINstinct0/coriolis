@@ -1,11 +1,12 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import TranslatedComponent from './TranslatedComponent';
-import { Ships } from 'coriolis-data/dist';
 import { Rocket } from './SvgIcons';
 import Persist from '../stores/Persist';
 import cn from 'classnames';
+import { Factory, Ship } from 'ed-forge';
 import autoBind from 'auto-bind';
+import { isEqual } from 'lodash';
 
 /**
  * Ship picker
@@ -14,13 +15,8 @@ import autoBind from 'auto-bind';
 export default class ShipPicker extends TranslatedComponent {
   static propTypes = {
     onChange: PropTypes.func.isRequired,
-    ship: PropTypes.string.isRequired,
-    build: PropTypes.string
+    ship: PropTypes.instanceOf(Ship).isRequired,
   };
-
-  static defaultProps = {
-    ship: 'eagle'
-  }
 
   /**
    * constructor
@@ -30,20 +26,38 @@ export default class ShipPicker extends TranslatedComponent {
   constructor(props, context) {
     super(props);
     autoBind(this);
-    this.state = { menuOpen: false };
+    this.state = {
+      menuOpen: false,
+      opponent: {
+        self: true,
+        type: props.ship.getShipType(),
+        stock: false,
+        id: undefined,
+      },
+    };
   }
 
   /**
    * Update ship
-   * @param {object} ship  the ship
-   * @param {string} build   the build, if present
+   * @param {boolean} self True to compare with ship itself
+   * @param {object} type The ship type
+   * @param {boolean} stock True to compare with a stock version of given type
+   * @param {string} id The build's stored ID
    */
-  _shipChange(ship, build) {
-    this._closeMenu();
-
-    // Ensure that the ship has changed
-    if (ship !== this.props.ship || build !== this.props.build) {
-      this.props.onChange(ship, build);
+  _shipChange(self, type, stock = false, id = null) {
+    const opponent = { self, type, stock, id };
+    if (isEqual(opponent, this.state.opponent)) {
+      this.setState({ menuOpen: false });
+    } else {
+      const { onChange } = this.props;
+      if (self) {
+        onChange(this.props.ship);
+      } else if (stock) {
+        onChange(Factory.newShip(type));
+      } else {
+        onChange(new Ship(Persist.getBuild(type, id)));
+      }
+      this.setState({ menuOpen: false, opponent });
     }
   }
 
@@ -52,26 +66,41 @@ export default class ShipPicker extends TranslatedComponent {
    * @returns {object}    the picker menu
    */
   _renderPickerMenu() {
-    const { ship, build } = this.props;
-    const _shipChange = this._shipChange;
-    const builds = Persist.getBuilds();
-    const buildList = [];
-    for (let shipId of this.shipOrder) {
-      const shipBuilds = [];
-      // Add stock build
-      const stockSelected = (ship == shipId && !build);
-      shipBuilds.push(<li key={shipId} className={ cn({ 'selected': stockSelected })} onClick={_shipChange.bind(this, shipId, null)}>Stock</li>);
-      if (builds[shipId]) {
-        let buildNameOrder = Object.keys(builds[shipId]).sort();
-        for (let buildName of buildNameOrder) {
-          const buildSelected = ship === shipId && build === buildName;
-          shipBuilds.push(<li key={shipId + '-' + buildName} className={ cn({ 'selected': buildSelected })} onClick={_shipChange.bind(this, shipId, buildName)}>{buildName}</li>);
-        }
-      }
-      buildList.push(<ul key={shipId} className='block'>{Ships[shipId].properties.name}{shipBuilds}</ul>);
+    const { menuOpen } = this.state;
+    if (!menuOpen) {
+      return null;
     }
 
-    return buildList;
+    const { translate } = this.context.language;
+    const { self, type, stock, id } = this.state.opponent;
+    return <div className='menu-list' onClick={(e) => e.stopPropagation()}>
+      <div className='quad'>
+        {Factory.getAllShipTypes().sort().map((shipType) =>
+          <ul key={shipType} className='block'>
+            {translate(shipType)}
+            {/* Add stock build */}
+            <li key={shipType}
+              onClick={this._shipChange.bind(this, false, shipType, true)}
+              className={cn({ selected: stock && type === shipType })}>
+              {translate('stock')}
+            </li>
+            {Persist.getBuildsNamesFor(shipType).sort().map((storedId) =>
+              <li key={`${shipType}-${storedId}`}
+                onClick={this._shipChange.bind(this, false, shipType, false, storedId)}
+                className={ cn({ selected: type === shipType && id === storedId })}>
+                {storedId}
+              </li>)}
+            {/* Add ship itself */}
+            {(this.props.ship.getShipType() === shipType ?
+              <li key='self'
+                onClick={this._shipChange.bind(this, true, shipType)}
+                className={cn({ selected: self })}>
+                {translate('THIS_SHIP')}
+              </li>
+              : null)}
+          </ul>)}
+      </div>
+    </div>;
   }
 
   /**
@@ -83,39 +112,34 @@ export default class ShipPicker extends TranslatedComponent {
   }
 
   /**
-   * Close the menu
-   */
-  _closeMenu() {
-    const { menuOpen } = this.state;
-    if (menuOpen) {
-      this._toggleMenu();
-    }
-  }
-
-  /**
    * Render picker
    * @return {React.Component} contents
    */
   render() {
-    const { language, onWindowResize, sizeRatio, tooltip, termtip } = this.context;
-    const { formats, translate, units } = language;
-    const { ship, build } = this.props;
+    const { translate } = this.context.language;
+    const { ship } = this.props;
     const { menuOpen } = this.state;
+    const { self, type, stock, id } = this.state.opponent;
 
-    const shipString = ship + ': ' + (build ? build : translate('stock'));
+    let label;
+    if (self) {
+      label = translate('THIS_SHIP');
+    } else if (stock) {
+      label = translate('stock');
+    } else {
+      label = id;
+    }
+
     return (
       <div className='shippicker' onClick={ (e) => e.stopPropagation() }>
         <div className='menu'>
           <div className={cn('menu-header', { selected: menuOpen })} onClick={this._toggleMenu}>
             <span><Rocket className='warning' /></span>
-            <span className='menu-item-label'>{shipString}</span>
+            <span className='menu-item-label'>
+              {`${translate(type)}: ${label}`}
+            </span>
           </div>
-          { menuOpen ?
-            <div className='menu-list' onClick={ (e) => e.stopPropagation() }>
-              <div className='quad'>
-                {this._renderPickerMenu()}
-              </div>
-            </div> : null }
+          {this._renderPickerMenu()}
         </div>
       </div>
     );

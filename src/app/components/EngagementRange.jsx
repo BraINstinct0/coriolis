@@ -2,6 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import TranslatedComponent from './TranslatedComponent';
 import Slider from '../components/Slider';
+import { moduleReduce } from 'ed-forge/lib/helper';
 
 /**
  * Engagement range slider
@@ -21,33 +22,16 @@ export default class EngagementRange extends TranslatedComponent {
    */
   constructor(props, context) {
     super(props);
-
-    const { ship } = props;
-
-    const maxRange = Math.round(this._calcMaxRange(ship));
-
     this.state = {
-      maxRange
+      maxRange: moduleReduce(
+        this.props.ship.getHardpoints(),
+        'maximumrange',
+        true,
+        // Don't use plain `Math.max` because callback will be passed four args
+        (a, v) => Math.max(a, v),
+        1000,
+      ),
     };
-  }
-
-  /**
-   * Calculate the maximum range of a ship's weapons
-   * @param   {Object}  ship     The ship
-   * @returns {int}              The maximum range, in metres
-   */
-  _calcMaxRange(ship) {
-    let maxRange = 1000;
-    for (let i = 0; i < ship.hardpoints.length; i++) {
-      if (ship.hardpoints[i].maxClass > 0 && ship.hardpoints[i].m && ship.hardpoints[i].enabled) {
-        const thisRange = ship.hardpoints[i].m.getRange();
-        if (thisRange > maxRange) {
-          maxRange = thisRange;
-        }
-      }
-    }
-
-    return maxRange;
   }
 
   /**
